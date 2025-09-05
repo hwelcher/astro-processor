@@ -33,13 +33,45 @@ pip install PySide6 numpy scipy astropy matplotlib opencv-python
 ## Run (GUI)
 
 ```
-python subframe_selector_ui.py
+python subframe_selector.py
 ```
 
 - Click "Add Files..." and select FITS frames
 - Choose worker count and backend (threads or processes)
 - Adjust detection settings (k-sigma, min/max star area, dilation) if needed
 - Click "Generate Statistics"
+
+## Build Windows Executable
+
+Use PyInstaller to package the app into a single Windows executable.
+
+Prereqs (PowerShell):
+
+```
+python -m venv .venv
+. .venv/Scripts/Activate.ps1
+pip install --upgrade pip
+pip install PySide6 numpy scipy astropy matplotlib opencv-python pyinstaller
+```
+
+Build (one-file, GUI — no console window):
+
+```
+.venv\Scripts\pyinstaller.exe --noconsole --onefile --name SubframeSelector subframe_selector.py
+```
+
+Output:
+
+- Executable: `dist\SubframeSelector.exe`
+- Spec file: `SubframeSelector.spec`
+- Intermediates: `build\`
+
+Notes:
+
+- One-file vs one-dir: replace `--onefile` with `--onedir` for faster startup and fewer AV false positives (outputs a folder in `dist\SubframeSelector\`).
+- Debugging: drop `--noconsole` to keep a console for logs.
+- App icon (optional): add `--icon path\to\app.ico`.
+- First launch of `--onefile` may be slower because it unpacks to a temp folder.
 
 ## Workflow
 
@@ -66,9 +98,7 @@ python subframe_selector_ui.py
 ## Project layout
 
 ```
-subframe_selector_ui.py        # GUI app (Subframe Selector)
-subframe_selector_ui copy.py   # Reference working copy
-output/                        # Example output folder (optional)
+subframe_selector.py        # GUI app (Subframe Selector)
 ```
 
 ## Roadmap

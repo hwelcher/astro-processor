@@ -2,3 +2,5 @@
 /subs
 /test
 /venv
+/build
+/dist

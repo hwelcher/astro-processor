@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Subframe statistics UI (FITS)
+Subframe Selector UI (FITS)
 
 Key points in this version:
 - Preview fix: render from a contiguous NumPy array as 24-bit RGB (no palette), set
@@ -843,7 +843,7 @@ class CopyWorker(QThread):
 class GraphWindow(QMainWindow):
     def __init__(self, results: List[Dict[str, Any]], parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Subframe Statistics – Graphs")
+        self.setWindowTitle("Subframe Selector – Graphs")
         self.results = results[:]
         self.metric_key = METRIC_FIELDS[0][0]
 
@@ -1532,7 +1532,7 @@ class GraphWindow(QMainWindow):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Subframe Statistics (FITS)")
+        self.setWindowTitle("Subframe Selector")
 
         central = QWidget(self)
         main = QHBoxLayout(central)
@@ -1586,15 +1586,15 @@ class MainWindow(QMainWindow):
         self.chk_proc.setToolTip("Use processes instead of threads. Threads are often faster for NumPy/OpenCV; processes provide isolation.")
         prog_row.addWidget(self.chk_proc)
         # GPU + Fast stats toggles
-        self.chk_gpu = QCheckBox("Use GPU", self)
-        gpu_available = HAS_CUDA or HAS_CUPY
-        self.chk_gpu.setChecked(gpu_available)
-        self.chk_gpu.setEnabled(gpu_available)
-        tip = "Use GPU acceleration (CuPy or OpenCV CUDA). Falls back to CPU if unavailable."
-        if not gpu_available:
-            tip += " Install CuPy (matching your CUDA) for GPU support."
-        self.chk_gpu.setToolTip(tip)
-        prog_row.addWidget(self.chk_gpu)
+        # self.chk_gpu = QCheckBox("Use GPU", self)
+        # gpu_available = HAS_CUDA or HAS_CUPY
+        # self.chk_gpu.setChecked(gpu_available)
+        # self.chk_gpu.setEnabled(gpu_available)
+        # tip = "Use GPU acceleration (CuPy or OpenCV CUDA). Falls back to CPU if unavailable."
+        # if not gpu_available:
+        #     tip += " Install CuPy (matching your CUDA) for GPU support."
+        # self.chk_gpu.setToolTip(tip)
+        # prog_row.addWidget(self.chk_gpu)
         self.chk_fast = QCheckBox("Fast background/noise", self)
         self.chk_fast.setChecked(True)
         self.chk_fast.setToolTip("Approximate median/MAD on a subset for speed on large images.")
@@ -1648,32 +1648,32 @@ class MainWindow(QMainWindow):
 
         right_panel.addWidget(param_group)
 
-        # Pixel Scale helper
-        px_group = QGroupBox("Pixel Scale (arcsec/px helper)", self)
-        px_form = QFormLayout(px_group)
+        # # Pixel Scale helper
+        # px_group = QGroupBox("Pixel Scale (arcsec/px helper)", self)
+        # px_form = QFormLayout(px_group)
 
-        self.sp_px_um = QDoubleSpinBox(self); self.sp_px_um.setDecimals(3); self.sp_px_um.setRange(0.1, 50.0); self.sp_px_um.setValue(3.760)
-        self.sp_px_um.setToolTip("Camera pixel size in microns (µm).")
+        # self.sp_px_um = QDoubleSpinBox(self); self.sp_px_um.setDecimals(3); self.sp_px_um.setRange(0.1, 50.0); self.sp_px_um.setValue(3.760)
+        # self.sp_px_um.setToolTip("Camera pixel size in microns (µm).")
 
-        self.sp_flen = QDoubleSpinBox(self); self.sp_flen.setDecimals(1); self.sp_flen.setRange(50.0, 10000.0); self.sp_flen.setValue(530.0)
-        self.sp_flen.setToolTip("Effective focal length in millimeters (mm). Include reducers/barlows if known.")
+        # self.sp_flen = QDoubleSpinBox(self); self.sp_flen.setDecimals(1); self.sp_flen.setRange(50.0, 10000.0); self.sp_flen.setValue(530.0)
+        # self.sp_flen.setToolTip("Effective focal length in millimeters (mm). Include reducers/barlows if known.")
 
-        self.sp_binning = QSpinBox(self); self.sp_binning.setRange(1, 8); self.sp_binning.setValue(1)
-        self.sp_binning.setToolTip("Sensor binning factor (1 = no binning). Multiplies effective pixel size.")
+        # self.sp_binning = QSpinBox(self); self.sp_binning.setRange(1, 8); self.sp_binning.setValue(1)
+        # self.sp_binning.setToolTip("Sensor binning factor (1 = no binning). Multiplies effective pixel size.")
 
-        self.sp_reducer = QDoubleSpinBox(self); self.sp_reducer.setDecimals(3); self.sp_reducer.setRange(0.2, 5.0); self.sp_reducer.setValue(1.000)
-        self.sp_reducer.setToolTip("Optics multiplier: 0.8 for a 0.8× reducer, 2.0 for a 2× barlow. Multiplies focal length.")
+        # self.sp_reducer = QDoubleSpinBox(self); self.sp_reducer.setDecimals(3); self.sp_reducer.setRange(0.2, 5.0); self.sp_reducer.setValue(1.000)
+        # self.sp_reducer.setToolTip("Optics multiplier: 0.8 for a 0.8× reducer, 2.0 for a 2× barlow. Multiplies focal length.")
 
-        self.btn_calc_scale = QPushButton("Calculate", self)
-        self.btn_calc_scale.setToolTip("Compute arcsec/pixel = 206.265 * (pixel_size_µm * binning) / (focal_length_mm * reducer). Fills the field above.")
+        # self.btn_calc_scale = QPushButton("Calculate", self)
+        # self.btn_calc_scale.setToolTip("Compute arcsec/pixel = 206.265 * (pixel_size_µm * binning) / (focal_length_mm * reducer). Fills the field above.")
 
-        px_form.addRow("Pixel size (µm):", self.sp_px_um); px_form.labelForField(self.sp_px_um).setToolTip(self.sp_px_um.toolTip())
-        px_form.addRow("Focal length (mm):", self.sp_flen); px_form.labelForField(self.sp_flen).setToolTip(self.sp_flen.toolTip())
-        px_form.addRow("Binning (×):", self.sp_binning);    px_form.labelForField(self.sp_binning).setToolTip(self.sp_binning.toolTip())
-        px_form.addRow("Reducer/Barlow (×):", self.sp_reducer); px_form.labelForField(self.sp_reducer).setToolTip(self.sp_reducer.toolTip())
-        px_form.addRow(self.btn_calc_scale)
+        # px_form.addRow("Pixel size (µm):", self.sp_px_um); px_form.labelForField(self.sp_px_um).setToolTip(self.sp_px_um.toolTip())
+        # px_form.addRow("Focal length (mm):", self.sp_flen); px_form.labelForField(self.sp_flen).setToolTip(self.sp_flen.toolTip())
+        # px_form.addRow("Binning (×):", self.sp_binning);    px_form.labelForField(self.sp_binning).setToolTip(self.sp_binning.toolTip())
+        # px_form.addRow("Reducer/Barlow (×):", self.sp_reducer); px_form.labelForField(self.sp_reducer).setToolTip(self.sp_reducer.toolTip())
+        # px_form.addRow(self.btn_calc_scale)
 
-        right_panel.addWidget(px_group)
+        # right_panel.addWidget(px_group)
 
         hint = QLabel("Graphs use robust sigma bands like PixInsight: median ±1σ/±2σ (σ from MAD).", self)
         hint.setWordWrap(True)
@@ -1692,7 +1692,7 @@ class MainWindow(QMainWindow):
         self.btn_cancel.clicked.connect(self.on_cancel)
         self.file_list.model().rowsInserted.connect(self._update_buttons)
         self.file_list.model().rowsRemoved.connect(self._update_buttons)
-        self.btn_calc_scale.clicked.connect(self.on_calc_scale)
+        # self.btn_calc_scale.clicked.connect(self.on_calc_scale)
         QApplication.instance().aboutToQuit.connect(self._shutdown)
 
         # Styling
@@ -1795,7 +1795,8 @@ class MainWindow(QMainWindow):
             "dilation": int(self.sp_dilate.value()),
             "max_stars": int(self.sp_max_stars.value()),
             "arcsec_per_pixel": arc,
-            "use_gpu": bool(self.chk_gpu.isChecked() and HAS_CUDA),
+            "use_gpu": False,
+            # "use_gpu": bool(self.chk_gpu.isChecked() and HAS_CUDA),
             "fast_stats": bool(self.chk_fast.isChecked()),
         }
 
