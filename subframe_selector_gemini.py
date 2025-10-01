@@ -489,53 +489,47 @@ class StatsWorker(QThread):
             self.params["arcsec_per_pixel"],
         )
 
-    def run(self):
-        try:
-            results: List[Dict[str, Any]] = []
-            total = len(self.files)
-            if total == 0:
-                self.finished_ok.emit([])
-                return
+# In the StatsWorker class:
 
-            Executor = ProcessPoolExecutor if self.use_processes else ThreadPoolExecutor
+def run(self):
+    try:
+        results: List[Dict[str, Any]] = []
+        total = len(self.files)
+        if total == 0:
+            self.finished_ok.emit([])
+            return
 
-            inflight = {}
-            next_idx = 0
+        Executor = ProcessPoolExecutor if self.use_processes else ThreadPoolExecutor
+        
+        with Executor(max_workers=self.workers) as ex:
+            # Submit the initial batch of tasks
+            futures = {ex.submit(analyze_image, f, **self.params) for f in self.files}
             done_count = 0
 
-            with Executor(max_workers=self.workers) as ex:
-                while next_idx < total and len(inflight) < self.workers:
-                    fut = self._submit(ex, self.files[next_idx])
-                    inflight[fut] = next_idx
-                    next_idx += 1
+            # Process tasks as they complete
+            for fut in as_completed(futures):
+                if self._cancel:
+                    # Cancel remaining futures
+                    for f in futures:
+                        f.cancel()
+                    self.cancelled.emit(results)
+                    return
 
-                while inflight:
-                    if self._cancel:
-                        for fut in inflight.keys():
-                            fut.cancel()
-                        self.cancelled.emit(results)
-                        return
+                try:
+                    res = fut.result()
+                    results.append(res)
+                    done_count += 1
+                    self.progressed.emit(done_count, total)
+                except Exception as e:
+                    # You might want to log this or handle it more gracefully
+                    print(f"A task failed: {e}")
 
-                    for fut in list(as_completed(inflight.keys(), timeout=None)):
-                        inflight.pop(fut, None)
-                        if fut.cancelled():
-                            self.cancelled.emit(results)
-                            return
-                        res = fut.result()
-                        results.append(res)
-                        done_count += 1
-                        self.progressed.emit(done_count, total)
+        # Once all tasks are done (or cancelled)
+        if not self._cancel:
+            self.finished_ok.emit(results)
 
-                        if next_idx < total and not self._cancel:
-                            nfut = self._submit(ex, self.files[next_idx])
-                            inflight[nfut] = next_idx
-                            next_idx += 1
-                        break
-
-                self.finished_ok.emit(results)
-
-        except Exception as e:
-            self.failed.emit(str(e))
+    except Exception as e:
+        self.failed.emit(str(e))
 
 
 # =========================== FITS Preview (zoom/pan + toolbar + histogram) ===========================
