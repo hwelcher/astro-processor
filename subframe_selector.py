@@ -390,6 +390,7 @@ def analyze_image(
     max_area: int,
     dilation_iter: int,
     max_stars: int,
+    crop_factor: int,
     arcsec_per_pixel: Optional[float] = None,
     fast_stats: bool = False,
     use_gpu: bool = False,
@@ -397,6 +398,17 @@ def analyze_image(
     img, header = load_fits(path, hdu_index=None, plane_index=None)
     h, w = img.shape
     work = downsample(img, downsample_factor)
+
+    if crop_factor > 0:
+        h_work, w_work = work.shape
+        # Crop a percentage from each side of the image
+        y_crop = int(h_work * (crop_factor / 200.0))
+        x_crop = int(w_work * (crop_factor / 200.0))
+
+        if y_crop > 0 or x_crop > 0:
+            y_end = -y_crop if y_crop > 0 else None
+            x_end = -x_crop if x_crop > 0 else None
+            work = work[y_crop:y_end, x_crop:x_end]
 
     # Extract observation date, fall back to None if not found
     date_obs = header.get("DATE-OBS")
@@ -492,6 +504,7 @@ class StatsWorker(QThread):
             self.params["max_area"],
             self.params["dilation"],
             self.params["max_stars"],
+            self.params["crop_factor"],
             self.params["arcsec_per_pixel"],
         )
 
@@ -1737,12 +1750,16 @@ class MainWindow(QMainWindow):
         self.sp_max_stars = QSpinBox(self); self.sp_max_stars.setRange(10, 200000); self.sp_max_stars.setValue(3000)
         self.sp_max_stars.setToolTip("Maximum stars to keep (largest by area). Limits cost on dense fields.")
 
+        self.sp_crop = QSpinBox(self); self.sp_crop.setRange(0, 49); self.sp_crop.setValue(0); self.sp_crop.setSuffix(" %")
+        self.sp_crop.setToolTip("Crop image border before analysis. A 10% crop analyzes the central 90% of width and 90% of height.")
+
         form.addRow("Downsample (×):", self.sp_down); form.labelForField(self.sp_down).setToolTip(self.sp_down.toolTip())
         form.addRow("k-sigma:", self.sp_ksig);       form.labelForField(self.sp_ksig).setToolTip(self.sp_ksig.toolTip())
         form.addRow("Min area (px):", self.sp_min_area); form.labelForField(self.sp_min_area).setToolTip(self.sp_min_area.toolTip())
         form.addRow("Max area (px):", self.sp_max_area); form.labelForField(self.sp_max_area).setToolTip(self.sp_max_area.toolTip())
         form.addRow("Dilation (iter):", self.sp_dilate); form.labelForField(self.sp_dilate).setToolTip(self.sp_dilate.toolTip())
         form.addRow("Max stars:", self.sp_max_stars);   form.labelForField(self.sp_max_stars).setToolTip(self.sp_max_stars.toolTip())
+        form.addRow("Crop factor:", self.sp_crop); form.labelForField(self.sp_crop).setToolTip(self.sp_crop.toolTip())
 
         right_panel.addWidget(param_group)
 
@@ -1872,6 +1889,7 @@ class MainWindow(QMainWindow):
             "max_area": int(self.sp_max_area.value()),
             "dilation": int(self.sp_dilate.value()),
             "max_stars": int(self.sp_max_stars.value()),
+            "crop_factor": int(self.sp_crop.value()),
             "arcsec_per_pixel": arc,
             "use_gpu": False,
             # "use_gpu": bool(self.chk_gpu.isChecked() and HAS_CUDA),
