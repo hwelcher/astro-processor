@@ -1187,6 +1187,34 @@ class GraphWindow(QMainWindow):
         self._init_plot()
         self.plot_metric()
 
+        self._preview_cacher: Optional[PreviewCacheWorker] = None
+        self._start_preview_caching()
+
+    def closeEvent(self, e: QCloseEvent) -> None:
+        if self._preview_cacher and self._preview_cacher.isRunning():
+            self._preview_cacher.request_cancel()
+            self._preview_cacher.wait(2000)  # Wait up to 2s
+        super().closeEvent(e)
+
+    # ---------- Caching
+
+    @Slot(str, float, QPixmap)
+    def _on_preview_ready(self, path: str, mtime: float, pixmap: QPixmap):
+        """Slot to receive a pre-cached preview pixmap from the background worker."""
+        if self._preview_cache is not None:
+            self._preview_cache[path] = (mtime, pixmap)
+
+    def _start_preview_caching(self):
+        """Kicks off the background thread to pre-cache all preview images."""
+        if self._preview_cacher and self._preview_cacher.isRunning():
+            self._preview_cacher.request_cancel()
+            self._preview_cacher.wait()
+
+        paths = [r["path"] for r in self.results]
+        self._preview_cacher = PreviewCacheWorker(paths, self._preview_downsample_factor, self)
+        self._preview_cacher.preview_ready.connect(self._on_preview_ready)
+        self._preview_cacher.start()
+
     # ---------- Utils
 
     @staticmethod
@@ -1575,6 +1603,39 @@ class GraphWindow(QMainWindow):
         self.copy_worker.failed.connect(on_failed)
         dlg.show()
         self.copy_worker.start()
+
+
+class PreviewCacheWorker(QThread):
+    """Pre-caches low-res preview pixmaps in the background."""
+    preview_ready = Signal(str, float, QPixmap)  # path, mtime, pixmap
+
+    def __init__(self, paths: List[str], downsample_factor: int, parent: Optional[QObject] = None):
+        super().__init__(parent)
+        self.paths = paths
+        self.downsample_factor = downsample_factor
+        self._cancel = False
+
+    def request_cancel(self):
+        self._cancel = True
+
+    def run(self):
+        for path in self.paths:
+            if self._cancel:
+                return
+            try:
+                mtime = os.path.getmtime(path)
+                img, _ = load_fits(path)
+                f = max(1, int(self.downsample_factor))
+                low = downsample(img, f)
+                view8 = _autoscale_stretch(low)
+                h, w = view8.shape
+                rgb = np.repeat(view8[:, :, None], 3, axis=2).copy(order="C")
+                qimg = QImage(rgb.data, w, h, 3 * w, QImage.Format_RGB888).copy()
+                pix = QPixmap.fromImage(qimg)
+                self.preview_ready.emit(path, mtime, pix)
+            except Exception:
+                # Silently ignore fails; the on-demand loader will catch it.
+                continue
 
 
 # =========================== Main Window ===========================
