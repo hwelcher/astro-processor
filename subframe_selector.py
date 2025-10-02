@@ -210,9 +210,12 @@ def detect_stars(
     dilation_iter: int = 1,
     max_stars: int = 3000,
     fast_stats: bool = False,
-    use_gpu: bool = False
+    use_gpu: bool = False,
+    bg: Optional[float] = None,
+    noise: Optional[float] = None,
 ) -> Tuple[np.ndarray, int]:
-    bg, noise = robust_bg_noise(img, fast=fast_stats)
+    if bg is None or noise is None:
+        bg, noise = robust_bg_noise(img, fast=fast_stats)
     blurred = _blur_gaussian(img, sigma=1, use_gpu=use_gpu)
     det = blurred - bg
     thresh = det > (k_sigma * noise)
@@ -397,10 +400,13 @@ def analyze_image(
 ) -> Dict[str, Any]:
     img, header = load_fits(path, hdu_index=None, plane_index=None)
     h, w = img.shape
-    work = downsample(img, downsample_factor)
+    work_uncropped = downsample(img, downsample_factor)
+
+    # Always calculate background/noise on the full (downsampled) frame
+    bg, noise = robust_bg_noise(work_uncropped, fast=fast_stats)
 
     if crop_factor > 0:
-        h_work, w_work = work.shape
+        h_work, w_work = work_uncropped.shape
         # Crop a percentage from each side of the image
         y_crop = int(h_work * (crop_factor / 200.0))
         x_crop = int(w_work * (crop_factor / 200.0))
@@ -408,7 +414,11 @@ def analyze_image(
         if y_crop > 0 or x_crop > 0:
             y_end = -y_crop if y_crop > 0 else None
             x_end = -x_crop if x_crop > 0 else None
-            work = work[y_crop:y_end, x_crop:x_end]
+            work = work_uncropped[y_crop:y_end, x_crop:x_end]
+        else:
+            work = work_uncropped
+    else:
+        work = work_uncropped
 
     # Extract observation date, fall back to None if not found
     date_obs = header.get("DATE-OBS")
@@ -416,12 +426,12 @@ def analyze_image(
     mean = float(np.mean(work, dtype=np.float64))
     median = float(np.median(work))
     std = float(np.std(work, dtype=np.float64))
-    bg, noise = robust_bg_noise(work, fast=fast_stats)
+    # Note: bg/noise are from the *uncropped* frame, but that's what we want for detection.
 
     labels, nstars = detect_stars(
         work, k_sigma=k_sigma, min_area=min_area, max_area=max_area,
         dilation_iter=dilation_iter, max_stars=max_stars,
-        fast_stats=fast_stats, use_gpu=use_gpu
+        fast_stats=fast_stats, use_gpu=use_gpu, bg=bg, noise=noise
     )
 
     fwhm_med_ds = float("nan")
