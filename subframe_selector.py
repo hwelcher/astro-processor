@@ -85,22 +85,24 @@ def load_fits(
     path: str,
     hdu_index: Optional[int] = None,
     plane_index: Optional[int] = None
-) -> np.ndarray:
-    """Load FITS -> 2D float32 array. (memmap=False for BSCALE/BZERO/BLANK)"""
+) -> Tuple[np.ndarray, Any]:
+    """Load FITS -> (2D float32 array, FITS header). (memmap=False for BSCALE/BZERO/BLANK)"""
     with fits.open(path, memmap=False) as hdul:
         if hdu_index is not None:
             if hdu_index < 0 or hdu_index >= len(hdul):
                 raise ValueError(f"HDU index {hdu_index} out of range for {path}")
-            data = hdul[hdu_index].data
+            hdu = hdul[hdu_index]
         else:
-            data = None
-            for hdu in hdul:
-                if getattr(hdu, "data", None) is not None:
-                    data = hdu.data
+            hdu = None
+            for h in hdul:
+                if getattr(h, "data", None) is not None:
+                    hdu = h
                     break
-        if data is None:
+        if hdu is None or hdu.data is None:
             raise ValueError(f"No image HDU found in {path}")
-        arr = np.array(data, dtype=np.float32)
+
+        header = hdu.header
+        arr = np.array(hdu.data, dtype=np.float32)
 
     if arr.ndim == 3:
         idx = 0 if plane_index is None else plane_index
@@ -115,7 +117,7 @@ def load_fits(
 
     med = float(np.nanmedian(arr))
     arr = np.nan_to_num(arr, nan=med, posinf=med, neginf=med)
-    return arr
+    return arr, header
 
 
 def downsample(img: np.ndarray, factor: int) -> np.ndarray:
@@ -392,9 +394,12 @@ def analyze_image(
     fast_stats: bool = False,
     use_gpu: bool = False,
 ) -> Dict[str, Any]:
-    img = load_fits(path, hdu_index=None, plane_index=None)
+    img, header = load_fits(path, hdu_index=None, plane_index=None)
     h, w = img.shape
     work = downsample(img, downsample_factor)
+
+    # Extract observation date, fall back to None if not found
+    date_obs = header.get("DATE-OBS")
 
     mean = float(np.mean(work, dtype=np.float64))
     median = float(np.median(work))
@@ -434,6 +439,7 @@ def analyze_image(
 
     res: Dict[str, Any] = {
         "path": path,
+        "date_obs": date_obs,
         "width": int(w),
         "height": int(h),
         "downsample": int(downsample_factor),
@@ -632,7 +638,7 @@ class FitsPreviewWindow(QMainWindow):
         self.resize(1100, 850)
 
         # Load & stretch
-        data = load_fits(path)
+        data, _ = load_fits(path)
         self.view8 = _autoscale_stretch(data)  # 8-bit grayscale view for display & histogram
 
         # Graphics view for smooth zoom/pan
@@ -1329,7 +1335,7 @@ class GraphWindow(QMainWindow):
         cached = self._preview_cache.get(path)
         if cached is not None and cached[0] == mtime:
             return cached[1]
-        img = load_fits(path)
+        img, _ = load_fits(path)
         f = max(1, int(self._preview_downsample_factor))
         low = downsample(img, f)
         view8 = _autoscale_stretch(low)
@@ -1877,6 +1883,11 @@ class MainWindow(QMainWindow):
         if not results:
             QMessageBox.information(self, "No results", "No statistics were produced.")
             return
+
+        # Sort results: chronological (if DATE-OBS exists), then by filename.
+        # Items without DATE-OBS are grouped after those with dates.
+        results.sort(key=lambda r: (r.get("date_obs") is None, r.get("date_obs", ""), Path(r.get("path", "")).name))
+
         self.results = results
         self.graph_window = GraphWindow(results, parent=self)
         self.graph_window.showMaximized()
