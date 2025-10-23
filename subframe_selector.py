@@ -26,6 +26,7 @@ import math
 import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+import datetime
 
 import numpy as np
 from astropy.io import fits
@@ -34,6 +35,12 @@ from astropy.modeling import models, fitting
 import numpy.random as random
 
 # Optional fast paths
+try:
+    import rawpy
+    HAS_RAWPY = True
+except Exception:
+    HAS_RAWPY = False
+
 try:
     import cv2
     HAS_CV2 = True
@@ -81,43 +88,77 @@ FWHM_FACTOR = 2.354820045  # 2 * sqrt(2 * ln(2))
 
 # =========================== Analysis / Metrics ===========================
 
-def load_fits(
+def load_nef(path: str) -> Tuple[np.ndarray, Dict[str, Any]]:
+    """Load NEF -> (2D float32 array, metadata dict)."""
+    if not HAS_RAWPY:
+        raise RuntimeError("rawpy is not installed, cannot load NEF files.")
+    with rawpy.imread(path) as raw:
+        # Debayer to RGB, then convert to grayscale for analysis.
+        # Use camera white balance for a neutral gray. Output 16-bit.
+        rgb = raw.postprocess(use_camera_wb=True, output_bps=16)
+
+        # Convert to grayscale for star detection. Average of channels is a simple approach.
+        if HAS_CV2:
+            gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+        else:
+            # Fallback if OpenCV isn't installed
+            gray = (rgb[:, :, 0] * 0.299 + rgb[:, :, 1] * 0.587 + rgb[:, :, 2] * 0.114)
+
+        arr = gray.astype(np.float32)
+
+    # Create a basic header-like dictionary from metadata
+    timestamp = raw.timestamp if hasattr(raw, 'timestamp') else os.path.getmtime(path)
+    header = {
+        'DATE-OBS': datetime.datetime.fromtimestamp(timestamp).isoformat(),
+        'NAXIS1': arr.shape[1],
+        'NAXIS2': arr.shape[0],
+    }
+    return arr, header
+
+
+def load_image(
     path: str,
     hdu_index: Optional[int] = None,
     plane_index: Optional[int] = None
 ) -> Tuple[np.ndarray, Any]:
-    """Load FITS -> (2D float32 array, FITS header). (memmap=False for BSCALE/BZERO/BLANK)"""
-    with fits.open(path, memmap=False) as hdul:
-        if hdu_index is not None:
-            if hdu_index < 0 or hdu_index >= len(hdul):
-                raise ValueError(f"HDU index {hdu_index} out of range for {path}")
-            hdu = hdul[hdu_index]
-        else:
-            hdu = None
-            for h in hdul:
-                if getattr(h, "data", None) is not None:
-                    hdu = h
-                    break
-        if hdu is None or hdu.data is None:
-            raise ValueError(f"No image HDU found in {path}")
+    """Load FITS or NEF -> (2D float32 array, FITS header or dict)."""
+    ext = Path(path).suffix.lower()
+    if ext in ['.fit', '.fits', '.fts']:
+        with fits.open(path, memmap=False) as hdul:
+            if hdu_index is not None:
+                if hdu_index < 0 or hdu_index >= len(hdul):
+                    raise ValueError(f"HDU index {hdu_index} out of range for {path}")
+                hdu = hdul[hdu_index]
+            else:
+                hdu = None
+                for h in hdul:
+                    if getattr(h, "data", None) is not None:
+                        hdu = h
+                        break
+            if hdu is None or hdu.data is None:
+                raise ValueError(f"No image HDU found in {path}")
 
-        header = hdu.header
-        arr = np.array(hdu.data, dtype=np.float32)
+            header = hdu.header
+            arr = np.array(hdu.data, dtype=np.float32)
 
-    if arr.ndim == 3:
-        idx = 0 if plane_index is None else plane_index
-        if idx < 0 or idx >= arr.shape[0]:
-            raise ValueError(f"plane_index {idx} out of range (0..{arr.shape[0]-1}) for {path}")
-        arr = arr[idx, :, :]
+        if arr.ndim == 3:
+            idx = 0 if plane_index is None else plane_index
+            if idx < 0 or idx >= arr.shape[0]:
+                raise ValueError(f"plane_index {idx} out of range (0..{arr.shape[0]-1}) for {path}")
+            arr = arr[idx, :, :]
 
-    if arr.ndim != 2:
-        arr = np.squeeze(arr)
         if arr.ndim != 2:
-            raise ValueError(f"Unsupported FITS dimensionality {arr.shape} in {path}")
+            arr = np.squeeze(arr)
+            if arr.ndim != 2:
+                raise ValueError(f"Unsupported FITS dimensionality {arr.shape} in {path}")
 
-    med = float(np.nanmedian(arr))
-    arr = np.nan_to_num(arr, nan=med, posinf=med, neginf=med)
-    return arr, header
+        med = float(np.nanmedian(arr))
+        arr = np.nan_to_num(arr, nan=med, posinf=med, neginf=med)
+        return arr, header
+    elif ext == '.nef':
+        return load_nef(path)
+    else:
+        raise ValueError(f"Unsupported file type for analysis: {ext}")
 
 
 def downsample(img: np.ndarray, factor: int) -> np.ndarray:
@@ -394,7 +435,7 @@ def analyze_image(
     fast_stats: bool = False,
     use_gpu: bool = False,
 ) -> Dict[str, Any]:
-    img, header = load_fits(path, hdu_index=None, plane_index=None)
+    img, header = load_image(path, hdu_index=None, plane_index=None)
     h, w = img.shape
     work = downsample(img, downsample_factor)
 
@@ -638,7 +679,7 @@ class FitsPreviewWindow(QMainWindow):
         self.resize(1100, 850)
 
         # Load & stretch
-        data, _ = load_fits(path)
+        data, _ = load_image(path)
         self.view8 = _autoscale_stretch(data)  # 8-bit grayscale view for display & histogram
 
         # Graphics view for smooth zoom/pan
@@ -1363,7 +1404,7 @@ class GraphWindow(QMainWindow):
         cached = self._preview_cache.get(path)
         if cached is not None and cached[0] == mtime:
             return cached[1]
-        img, _ = load_fits(path)
+        img, _ = load_image(path)
         f = max(1, int(self._preview_downsample_factor))
         low = downsample(img, f)
         view8 = _autoscale_stretch(low)
@@ -1624,7 +1665,7 @@ class PreviewCacheWorker(QThread):
                 return
             try:
                 mtime = os.path.getmtime(path)
-                img, _ = load_fits(path)
+                img, _ = load_image(path)
                 f = max(1, int(self.downsample_factor))
                 low = downsample(img, f)
                 view8 = _autoscale_stretch(low)
@@ -1840,7 +1881,7 @@ class MainWindow(QMainWindow):
     @Slot()
     def on_add_files(self):
         files, _ = QFileDialog.getOpenFileNames(
-            self, "Select FITS files", "", "FITS files (*.fits *.fit *.fts);;All files (*.*)"
+            self, "Select FITS or NEF files", "", "Supported files (*.fits *.fit *.fts *.nef);;All files (*.*)"
         )
         for f in files:
             if f and os.path.isfile(f):
